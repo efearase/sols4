@@ -1,86 +1,69 @@
+from json.decoder import JSONDecodeError
+from datetime import datetime
 import requests
-from bs4 import BeautifulSoup
-import unittest
-import re
 
-# При открытии файла, добавьте в функцию open необязательный параметр
-# encoding='utf-8', его отсутствие в коде будет вызвать падение вашего
-# решения на грейдере с ошибкой UnicodeDecodeError
-path_to_file = '/Users/gosa/Desktop/инфа/sols4/wiki/Stone_Age'
+ACCESS_TOKEN = '17da724517da724517da72458517b8abce117da17da' \
+               '72454d235c274f1a2be5f45ee711'
+API_URL = 'https://api.vk.com/method'
+V = '5.71'
 
 
-def get_html(path_to_file):
-    html = ''
-    with open(path_to_file, 'r', encoding='utf-8') as file:
-        html = file.read()
-    return html
+def get_user_id(uid):
+    users_get = '{}/users.get'.format(API_URL)
+    resp = requests.get(users_get, params={
+        'access_token': ACCESS_TOKEN,
+        'user_ids': uid,
+        'v': V
+    })
+    try:
+        resp = resp.json()
+        resp = resp['response']
+        user = resp[0]
+        return user['id']
+    except (JSONDecodeError, IndexError, KeyError):
+        pass
 
 
-html = get_html(path_to_file)
-soup = BeautifulSoup(html, "html.parser")
-body = soup.find(id="bodyContent")
+def get_friends(user_id):
+    friends_get = '{}/friends.get'.format(API_URL)
+    resp = requests.get(friends_get, params={
+        'access_token': ACCESS_TOKEN,
+        'user_id': user_id,
+        'fields': 'bdate',
+        'v': V
+    })
+    try:
+        resp = resp.json()
+        resp = resp['response']
+        return resp['items']
+    except (JSONDecodeError, KeyError):
+        pass
 
 
-def img_parser(html=html, body=body):
-    imgs = body.find_all('img')
-    fit_imgs = len(
-        [x for x in imgs if x.get('width') and int(x.get('width')) >= 200]
-    )
-    return fit_imgs
+def calc_age(uid):
+    user_id = get_user_id(uid)
+    if user_id is None:
+        return
 
+    friends = get_friends(user_id)
+    if friends is None:
+        return
 
-def header_parser(html=html, body=body):
-    headers = body.find_all(re.compile('^h[1-6]$'))
-    count = 0
-    for header in headers:
-        children = header.find_all(recursive=False)
-        if children:
-            children_content = [x.getText() for x in children if x.getText()]
-            try:
-                first_letter = children_content[0][0]
-                if first_letter in 'ETC':
-                    count += 1
-            except IndexError:
-                pass
-        else:
-            try:
-                first_letter = header.getText()[0]
-                if first_letter in 'ETC':
-                    count += 1
-            except IndexError:
-                pass
-    return count
+    years = {}
+    cur_year = datetime.now().year
 
+    for friend in friends:
+        bdate = friend.get('bdate')
+        if not bdate:
+            continue
 
-def link_parser(html=html, body=body):
-    max_count = 0
-    all_links = body.find_all('a')
-    for link in all_links:
-        current_count = 1
-        siblings = link.find_next_siblings()
-        for sibling in siblings:
-            if sibling.name == 'a':
-                current_count += 1
-                max_count = max(current_count, max_count)
-            else:
-                current_count = 0
-    return max_count
+        bdate = bdate.split('.')
+        if len(bdate) != 3:
+            continue
 
+        year = int(bdate[2])
+        diff = cur_year - year
+        years.setdefault(diff, 0)
+        years[diff] += 1
 
-def list_parser(html=html, body=body):
-    count = 0
-    all_lists = body.find_all(['ul', 'ol'])
-    for tag in all_lists:
-        if not tag.find_parents(['ul', 'ol']):
-            count += 1
-    return count
-
-
-def parse(path_to_file):
-    html = get_html(path_to_file)
-    soup = BeautifulSoup(html, "html.parser")
-    body = soup.find(id="bodyContent")
-    return [img_parser(), header_parser(), link_parser(), list_parser()]
-
-
-print(parse(path_to_file))
+    return sorted(years.items(), key=lambda v: (v[1], -v[0]), reverse=True)
